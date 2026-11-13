@@ -15,15 +15,20 @@ class Client:
         self.base, self.timeout = base.rstrip('/') + '/', timeout
         self.session = requests.Session()
         self.session.headers.update({'User-Agent':'Mozilla/5.0 (compatible; DTicketReadOnly/1.0)'})
-        response = self.session.get(self.base + 'home/Home', timeout=timeout)
-        response.raise_for_status()
+        response = self.session.get(self.base + 'home/Home', timeout=timeout, allow_redirects=False)
+        self.check_status(response)
         match = re.search(r'SmartUtil\.hiddenParams\.viewStateHolder\s*=\s*"([^"]+)"', response.text)
         if not match: raise ValueError('home page missing viewStateHolder')
         self.token = match.group(1)
+    @staticmethod
+    def check_status(response):
+        if 300 <= response.status_code < 400:
+            raise requests.HTTPError(f'upstream redirect rejected: HTTP {response.status_code}')
+        response.raise_for_status()
     def post(self, endpoint, data):
         path = 'home/Home/getStation' if endpoint == 'getStation' else 'booking/booking/' + endpoint
-        response = self.session.post(self.base + path, data={**data, 'viewStateHolder':self.token}, timeout=self.timeout)
-        response.raise_for_status()
+        response = self.session.post(self.base + path, data={**data, 'viewStateHolder':self.token}, timeout=self.timeout, allow_redirects=False)
+        self.check_status(response)
         payload = response.json()
         if not isinstance(payload, dict) or payload.get('errorCode') != 'S_SUCCESS':
             raise ValueError(f'{endpoint}: unsuccessful response')
@@ -35,8 +40,8 @@ class Client:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--station', help='search station names (Thai or English)')
-    parser.add_argument('--origin', help='origin station ID')
-    parser.add_argument('--destination', help='destination station ID')
+    parser.add_argument('--origin', help='origin station ID or exact name')
+    parser.add_argument('--destination', help='destination station ID or exact name')
     parser.add_argument('--date', action='append', help='departure date YYYY-MM-DD; repeatable')
     parser.add_argument('--train', action='append', help='train number; repeatable, defaults to all trains')
     parser.add_argument('--json', action='store_true', help='JSON Lines output')
@@ -79,6 +84,28 @@ def main(argv=None):
                     row = dict(zip(('station_id', 'station_no', 'name_th', 'name_en'), (s[f] for f in fields)))
                     print(json.dumps(row, ensure_ascii=False) if args.json else f"{row['station_id']}  {row['name_th']} / {row['name_en']} (station no: {row['station_no']})")
             return 0
+        except Exception as exc:
+            print(f'station lookup failed: {exc}', file=sys.stderr); return 1
+    if not (args.origin.isascii() and args.origin.isdigit() and args.destination.isascii() and args.destination.isdigit()):
+        try:
+            stations = api.post('getStation', {'LineId':''})
+            fields = ('stationId', 'stationNameTh', 'stationNameEn')
+            if not isinstance(stations, list) or any(not isinstance(s, dict) or any(not isinstance(s.get(f), str) or not s[f].strip() for f in fields) or not s['stationId'].isascii() or not s['stationId'].isdigit() for s in stations):
+                raise ValueError('malformed station list')
+            for field in ('origin', 'destination'):
+                value = getattr(args, field)
+                if value.isascii() and value.isdigit(): continue
+                matches = [s for s in stations if value.strip().casefold() in (s['stationNameTh'].strip().casefold(), s['stationNameEn'].strip().casefold())]
+                if len(matches) > 1:
+                    choices = '; '.join(f"{s['stationId']} {s['stationNameTh']} / {s['stationNameEn']}" for s in matches)
+                    raise ValueError(f'{field}: ambiguous station name {value!r}; choose an ID: {choices}')
+                if not matches:
+                    needle = value.strip().casefold()
+                    suggestions = [s for s in stations if needle and (needle in s['stationNameTh'].casefold() or needle in s['stationNameEn'].casefold())]
+                    choices = '; '.join(f"{s['stationId']} {s['stationNameTh']} / {s['stationNameEn']}" for s in suggestions[:20])
+                    hint = f'; possible choices: {choices}' if choices else '; use --station to search names'
+                    raise ValueError(f'{field}: unknown station name {value!r}{hint}')
+                setattr(args, field, matches[0]['stationId'])
         except Exception as exc:
             print(f'station lookup failed: {exc}', file=sys.stderr); return 1
     failed = False

@@ -40,6 +40,47 @@ class MonitorTests(unittest.TestCase):
         cls.server.shutdown(); cls.server.server_close(); cls.thread.join()
     def run_cli(self, *args):
         return subprocess.run([sys.executable, str(ROOT/'dticket_monitor.py'), '--origin', '101', '--destination', '202', '--date', '2026-12-25', '--base-url', f'http://127.0.0.1:{self.server.server_port}/', *args], text=True, capture_output=True)
+    def test_help_documents_route_names(self):
+        result = subprocess.run([sys.executable, str(ROOT/'dticket_monitor.py'), '--help'], text=True, capture_output=True)
+        self.assertIn('origin station ID or exact name', result.stdout)
+        self.assertIn('destination station ID or exact name', result.stdout)
+
+    def test_malformed_station_id_does_not_reach_trip_search(self):
+        stations = [{'stationId':'', 'stationNo':'11', 'stationNameTh':'หนึ่ง', 'stationNameEn':'One'}]
+        with patch.object(monitor.Client, '__init__', return_value=None), patch.object(monitor.Client, 'post', return_value=stations) as post, patch('sys.stderr', new_callable=__import__('io').StringIO) as err:
+            code = monitor.main(['--origin','One','--destination','202','--date','2026-12-25'])
+        self.assertEqual(code, 1)
+        self.assertIn('malformed', err.getvalue())
+        self.assertEqual(post.call_count, 1)
+
+    def test_unknown_partial_name_suggests_matches_without_searching_trips(self):
+        result = self.run_cli('--origin', 'Phrabat', '--json')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('unknown', result.stderr.lower())
+        self.assertIn('174', result.stderr)
+        self.assertIn('Khao Phrabat', result.stderr)
+
+    def test_ambiguous_name_reports_choices_without_querying_trips(self):
+        stations = [
+            {'stationId':'1', 'stationNo':'11', 'stationNameTh':'หนึ่ง', 'stationNameEn':'Same'},
+            {'stationId':'2', 'stationNo':'22', 'stationNameTh':'สอง', 'stationNameEn':'Same'},
+        ]
+        with patch.object(monitor.Client, '__init__', return_value=None), patch.object(monitor.Client, 'post', return_value=stations) as post, patch('sys.stderr', new_callable=__import__('io').StringIO) as err:
+            code = monitor.main(['--origin','Same','--destination','202','--date','2026-12-25'])
+        self.assertEqual(code, 1)
+        self.assertIn('ambiguous', err.getvalue().lower())
+        self.assertIn('1', err.getvalue())
+        self.assertIn('2', err.getvalue())
+        self.assertIn('หนึ่ง', err.getvalue())
+        self.assertEqual(post.call_count, 1)
+
+    def test_route_names_resolve_to_station_ids(self):
+        result = self.run_cli('--origin', ' KHAO PHRABAT ', '--destination', 'เขาพระบาท', '--json')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual((row['origin_id'], row['destination_id']), ('174', '174'))
+
     def test_station_search_finds_case_insensitive_english_name(self):
         result = subprocess.run([sys.executable, str(ROOT/'dticket_monitor.py'), '--station', 'PHRABAT', '--json', '--base-url', f'http://127.0.0.1:{self.server.server_port}/'], text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -107,6 +148,36 @@ class MonitorTests(unittest.TestCase):
             row = json.loads(out.getvalue())
             self.assertIn('unknown', row['error'])
             self.assertNotIn('sleepers', row)
+
+    def test_upstream_redirects_are_not_followed_and_report_unknown(self):
+        for method in ('GET', 'POST'):
+            for status in (300, 302, 304, 307, 308):
+                with self.subTest(method=method, status=status):
+                    seen = []
+                    class RedirectHandler(Handler):
+                        def do_GET(self):
+                            seen.append(('GET', self.path))
+                            if method == 'GET' or self.path == '/capture':
+                                self.send_response(status); self.send_header('Location', '/capture'); self.end_headers()
+                            else:
+                                super().do_GET()
+                        def do_POST(self):
+                            seen.append(('POST', self.path))
+                            self.send_response(status); self.send_header('Location', '/capture'); self.end_headers()
+                    server = ThreadingHTTPServer(('127.0.0.1', 0), RedirectHandler)
+                    thread = Thread(target=server.serve_forever, daemon=True); thread.start()
+                    try:
+                        result = subprocess.run([sys.executable, str(ROOT/'dticket_monitor.py'), '--origin', '101', '--destination', '202', '--date', '2026-12-25', '--json', '--base-url', f'http://127.0.0.1:{server.server_port}/'], text=True, capture_output=True)
+                    finally:
+                        server.shutdown(); server.server_close(); thread.join()
+                    self.assertEqual(result.returncode, 1)
+                    error = json.loads(result.stdout)['error']
+                    self.assertIn('unknown', error)
+                    self.assertIn('redirect', error.lower())
+                    self.assertIn(str(status), error)
+                    expected = [('GET', '/home/Home')]
+                    if method == 'POST': expected.append(('POST', '/booking/booking/getTrip'))
+                    self.assertEqual(seen, expected)
 
     def test_real_http_failure_is_unknown(self):
         class FailingHandler(Handler):
