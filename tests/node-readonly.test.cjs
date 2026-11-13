@@ -8,8 +8,23 @@ test('CLI help shows check and station commands', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /check/);
   assert.match(result.stdout, /station/);
+  assert.doesNotMatch(result.stdout, /\b(?:setup|run)\b/);
 });
 
+
+test('removed commands are rejected as invalid without executing them', () => {
+  for (const command of ['setup', 'run']) {
+    const result = spawnSync(process.execPath, [cli, command, '--invalid'], {encoding:'utf8', timeout:5000});
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, /dticket check/);
+    assert.match(result.stderr, /dticket station/);
+  }
+});
+
+test('package includes only the read-only CLI modules', () => {
+  const pkg = require('../package.json');
+  assert.deepEqual([...pkg.files].sort(), ['dticket-cli.cjs', 'dticket-readonly.cjs'].sort());
+});
 
 test('read-only station and trip search keeps cookie and rotates tokens', async () => {
   const http = require('node:http');

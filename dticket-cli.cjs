@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 const {Client,BASE,validateStations,resolveStation,search,normalize}=require('./dticket-readonly.cjs');
-const usage='dticket check --origin NAME_OR_ID --destination NAME_OR_ID --date YYYY-MM-DD [--train NUMBER] [--json]\ndticket station NAME [--json]\ndticket setup [--config PATH --schedule CRON -- CHECK_OPTIONS]\ndticket run --config PATH';
+const usage='dticket check --origin NAME_OR_ID --destination NAME_OR_ID --date YYYY-MM-DD [--train NUMBER] [--json]\ndticket station NAME [--json]';
 function parse(argv) {
   const command=argv.shift(); if (command==='--help' || command==='-h') return {help:true};
   if (!['check','station'].includes(command)) throw Error(usage);
@@ -17,10 +17,6 @@ function parse(argv) {
 }
 function emit(row,json) { if(json) return console.log(JSON.stringify(row)); if(row.error) return console.log(`Date: ${row.date || 'unknown'}  Train: ${row.train || '-'}\n  ERROR: ${row.error}`); if(row.trains) return console.log(`Date: ${row.date}\n  No trains returned.`); console.log(`Date: ${row.date}  Train: ${row.train}\n  ${row.departure} -> ${row.arrival}`); for (const s of row.sleepers) console.log(`  ${s.description} (class ${s.class}): category count ${s.category_available_count}\n  Fares THB: ${JSON.stringify(s.fares_thb)}`); console.log('  Category count is not individual berth availability.'); }
 async function main(args, options = {}) {
-  if (args[0] === 'setup' || args[0] === 'run') {
-    const setup = require('./dticket-setup.cjs');
-    return setup.cli(args, {command:[process.execPath, __filename], runMonitor:setup.runMonitor});
-  }
   let o; try { o=parse(args); } catch(e) { console.error(e.message); return 2; } if(o.help){console.log(usage);return 0;}
   let api; try { api=new Client(options.base || o.base,o.timeout); await api.init(); } catch(e) { if(o.command==='station') console.error(`station lookup failed: ${e.message}`); else emit({error:`availability unknown: ${e.message}`},o.json); return 1; }
   let stations;
