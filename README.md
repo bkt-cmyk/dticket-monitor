@@ -1,5 +1,7 @@
 # D-Ticket monitor
 
+**EN** | [TH](README.th.md)
+
 Read-only category search for Thai State Railway D-Ticket. It retrieves public trip and coach data; it does not log in, select seats, reserve, pay, send notifications, or install a scheduler. The upstream website is undocumented and may change.
 
 ## Install locally
