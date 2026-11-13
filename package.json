@@ -1,0 +1,9 @@
+{
+  "name": "dticket-monitor-readonly",
+  "version": "1.0.0",
+  "private": true,
+  "bin": { "dticket": "./dticket-cli.cjs" },
+  "scripts": { "test": "node --test tests/*.test.cjs" },
+  "files": ["dticket-cli.cjs", "dticket-readonly.cjs", "dticket-setup.cjs"],
+  "engines": { "node": ">=20" }
+}
