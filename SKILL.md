@@ -8,7 +8,7 @@ version: 0.2.0
 
 ## When to use
 
-Use the Node.js CLI for read-only Thai railway trip and general-passenger sleeper category searches. Do not reserve, pay, or promise individual berth availability. This skill does not include the application. Legacy Python files remain in the repository; the English README may still describe them.
+Use the Node.js CLI for read-only Thai railway trip and general-passenger sleeper category searches. Do not reserve, pay, or promise individual berth availability. This skill does not include the application.
 
 ## Procedure
 
@@ -19,4 +19,4 @@ Use the Node.js CLI for read-only Thai railway trip and general-passenger sleepe
 
 ## Verification and limits
 
-Run `npm test` in the project directory. Tests use local HTTP and mocked webhook behavior; actual Discord delivery and cron have not been tested end-to-end. A live read-only check is separate and cannot guarantee future site compatibility. The site's endpoints are undocumented; missing categories, trains or fields, and failed requests are not proof of no availability. The CLI timeout applies per HTTP request; scheduled checks have a 180-second overall timeout. Scheduling uses fixed dates, posts every run, truncates long messages, and has no retry or overlap prevention. See README.th.md for security findings from the older Python version; those findings are not a scan of the current Node version.
+Run `npm test` in the project directory. Tests use local HTTP and mocked webhook behavior; actual Discord delivery and cron have not been tested end-to-end. A live read-only check is separate and cannot guarantee future site compatibility. The site's endpoints are undocumented; missing categories, trains or fields, and failed requests are not proof of no availability. The CLI timeout applies per HTTP request; scheduled checks have a 180-second overall timeout. Scheduling uses fixed dates, posts every run, truncates long messages, and has no retry or overlap prevention. See README.md and README.th.md for the limitations of the static scan of a Node development snapshot; it is not a security guarantee.

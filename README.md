@@ -2,72 +2,83 @@
 
 **EN** | [TH](README.th.md)
 
-Read-only category search for Thai State Railway D-Ticket. It retrieves public trip and coach data; it does not log in, select seats, reserve, pay, send notifications, or install a scheduler. The upstream website is undocumented and may change.
+A Node.js CLI that searches stations and reads general-passenger sleeper category counts and fares from Thailand's D-Ticket website. It does not log in, select seats, reserve, or pay. The website's internal endpoints are undocumented and can change. A category count or fare does not confirm that a particular berth is available or bookable; check [D-Ticket](https://dticket.railway.co.th/DTicketPublicWeb/) before making plans.
 
-## Install locally
+## Requirements and local use
 
-Requires Python 3.9+ and `requests`. From this directory:
+Node.js 20 or newer is required. The project declares no npm dependencies. Internet access is needed for real searches; npm is needed to run the tests or install the local command. The package is private and has not been published to npm: do not assume `npx` can download it.
 
-```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m unittest discover -s tests -v
-```
-
-On Windows use `.venv\Scripts\python.exe`. The test suite uses a local HTTP server and no railway network access.
-
-## Optional Hermes skill installation
-
-The Python app remains in this project directory; the skill is only instructions and does not bundle the app. First complete the local install above. The following copies only `SKILL.md` into the selected Hermes home; it does not install dependencies there, edit configuration, schedule jobs, or send messages. Review the destination and obtain approval before running it. From the project directory, on a POSIX shell:
+From a reviewed local copy:
 
 ```sh
-HERMES_SKILL_HOME="${HERMES_HOME:-$HOME/.hermes}"
-test ! -e "$HERMES_SKILL_HOME/skills/dticket-monitor" || { printf '%s\n' 'Destination already exists; stop and inspect it.'; exit 1; }
-mkdir -p "$HERMES_SKILL_HOME/skills/dticket-monitor"
-cp SKILL.md "$HERMES_SKILL_HOME/skills/dticket-monitor/SKILL.md"
+node --version
+node dticket-cli.cjs --help
+node dticket-cli.cjs station 'Chiang Mai' --json
 ```
 
-In a new Hermes session, request the `dticket-monitor` skill and give it the absolute project directory. Installed skills are discovered in new sessions; see the [official skill guide](https://hermes-agent.nousresearch.com/docs/guides/work-with-skills). To remove this optional installation, delete only the copied skill directory after confirming its path. For Windows, manually copy `SKILL.md` to the active Hermes home's `skills/dticket-monitor` directory; use the Windows venv interpreter in the project.
-
-## Station lookup
+Station search matches partial Thai or English names without case sensitivity. Each JSON line contains `station_id`, `station_no`, `name_th`, and `name_en`. No matches produce no output and exit 0. Check the station before using it: `station_id` and `station_no` are different.
 
 ```sh
-.venv/bin/python dticket_monitor.py --station 'Chiang Mai' --json
+node dticket-cli.cjs check --origin ORIGIN_ID --destination DESTINATION_ID --date YYYY-MM-DD --train TRAIN_NUMBER --json
 ```
 
-This downloads the site's public station list using the same read-only `home/Home/getStation` request as its home page, then matches Thai or English names case-insensitively by substring. Each JSON line contains `station_id`, `station_no`, `name_th`, and `name_en`; use **station_id**, not station_no, for trip searches. Confirm the intended station when names are similar. No matches means no output and exit 0; a failed or malformed lookup exits 1. The undocumented source can change, and lookup does not guarantee a route is served.
+Replace the placeholders with confirmed values. Origin and destination also accept exact case-insensitive station names; use the ID if a name is ambiguous. Dates use the Gregorian calendar. Repeat `--date` or `--train` for multiple values; omitting `--train` checks every returned train and can make many requests. `--json` emits JSON Lines; without it, output is human-readable. `--timeout 25` sets the timeout in seconds per HTTP request, not for the whole check.
 
-## Run
+The following is an example from a test server, not live railway data:
 
-Use station IDs from lookup or independently verify the booking site's selections. Names, station numbers and IDs are not interchangeable. No defaults for a user's route are stored in the project.
+```json
+{"date":"2026-12-25","train":"42","origin_id":"174","destination_id":"174","departure":"2026-12-25 20:00","arrival":"2026-12-26 06:00","sleepers":[{"description":"ผู้โดยสารทั่วไป sleeper","class":"2","category_available_count":2,"fares_thb":{"Lower Berth":800,"Upper Berth":700}}]}
+```
+
+`category_available_count` is a category-level count, not availability of an individual berth. The CLI does not infer seat selectability or waiting-list availability. A missing train or category, malformed response, or request failure means availability is unknown, not sold out. An empty trip list without a requested train produces an empty-trains record. Some checks may succeed alongside errors; inspect every row. Exit status is 0 when checks complete without errors, 1 on a failure, and 2 for invalid arguments.
+
+### Optional local command install
+
+Direct `node` invocation needs no install. To install the `dticket` command into a separate local directory, replace the source path with the absolute path to your reviewed copy:
 
 ```sh
-.venv/bin/python dticket_monitor.py --origin ORIGIN_ID --destination DESTINATION_ID --date YYYY-MM-DD --train TRAIN_NUMBER
+mkdir -p "$HOME/dticket-local"
+npm install --prefix "$HOME/dticket-local" --offline --ignore-scripts --no-audit --no-fund /path/to/dticket-monitor
+"$HOME/dticket-local/node_modules/.bin/dticket" --help
 ```
 
-Repeat `--date` and/or `--train` for multiple values. Omitting `--train` checks all trains returned, which can cause many requests. Dates are Gregorian. Add `--json` for newline-delimited JSON records; default is human-readable. `--timeout 25` sets the connect and read timeout for each HTTP request, not a total run deadline. The tool sends a GET for the home page then POSTs only to the site's read-only `getTrip` and `getTrainCoach` search endpoints; it never submits a booking.
+This writes to `dticket-local`; inspect the destination first. Do not use `sudo`. Reinstall and check the command if you move or remove the source.
 
-`category_available_count` is the reported category count, not availability of a particular berth or a guarantee of a bookable ticket. Listed prices do not establish berth availability. Neither category selectability nor waiting-list availability is inferred or reported. A missing category, missing requested train, malformed response, or failed request is an error/unknown, not sold out. Empty trip lists without an explicit train produce an empty-trains record, not a sold-out verdict. Per-date or per-train errors are emitted and other checks continue. A session initialization failure ends the run. Exit status: 0 all checks completed, 1 at least one failed, 2 invalid arguments. Outputs can contain route IDs and dates; protect logs appropriately.
+## Optional setup and Discord notifications
 
-## Safe scheduling
-
-Run manually first and ensure the upstream service permits your polling. If you later choose to schedule it, use a modest frequency, avoid overlapping executions, account for timezone and request volume, set a bounded runtime, protect log files, and monitor nonzero exit status. Obtain separate approval before creating or changing cron, timers, or notifications. This project does not modify them. No retry or notification is built in.
-
-### Optional Hermes no-agent job (not installed by this project)
-
-The following is a setup example, **not an action already performed**. It uses local-only output; inspect it before enabling anything. Hermes scripts must resolve inside the active profile's `$HERMES_HOME/scripts` directory, and the script setting is a filename, not a command line. A shell wrapper can invoke this project's venv explicitly, avoiding a dependency on Hermes's Python environment. Replace all placeholders and use absolute paths; dates are fixed until you edit the wrapper. For example, after separate approval, create `$HERMES_HOME/scripts/dticket-check.sh` (use `~/.hermes` if `HERMES_HOME` is unset) with:
-
-```bash
-#!/bin/bash
-exec /ABSOLUTE/PATH/TO/dticket-monitor/.venv/bin/python /ABSOLUTE/PATH/TO/dticket-monitor/dticket_monitor.py --origin ORIGIN_ID --destination DESTINATION_ID --date YYYY-MM-DD --train TRAIN_NUMBER --json --timeout 15
-```
-
-Run the wrapper manually with `bash "$HERMES_HOME/scripts/dticket-check.sh"` after setting `HERMES_HOME` to the active profile directory in your shell. Confirm its output and exit status, then, if separately approved, create a paused local job using a Hermes version supporting these flags:
+Run a manual check before scheduling. On a POSIX system with cron, create a private directory outside all Git working trees, then run setup in a TTY:
 
 ```sh
-hermes cron create 'every 6h' --no-agent --script dticket-check.sh --deliver local --name dticket-check --paused
-hermes cron list
-hermes cron status
+mkdir -m 700 "$HOME/dticket-private"
+node dticket-cli.cjs setup
 ```
 
-Review the job and scheduler status before separately approving `hermes cron resume dticket-check`. A running gateway ticks the scheduler; consult the [Hermes cron documentation](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron) for alternatives and version-specific behavior. No-agent mode sends stdout to the configured destination and uses nonzero exit as failure; partial successful rows may coexist with errors. Script timeout and per-request timeout differ; limit date/train count and check scheduler timeout and overlap behavior. Inspect local job output/history and failure status; no end-to-end scheduling or notification was tested here. Don't select a messaging destination without separate approval.
+If the directory already exists, inspect its owner and permissions instead. Setup asks for origin, destination, comma-separated dates, an optional train, a five-field cron schedule, an absolute config path such as `/home/USER/dticket-private/config.json`, and a Discord webhook in a hidden prompt. Replace `USER` with your account name. Enter the webhook yourself; do not put it in chat, shell arguments, history, or Git.
+
+The parent directory must already exist, be owned by the executing user, and have no group or other access. Setup creates a new owner-only `0600` config and refuses to overwrite an existing file. The config contains the webhook and route data; protect it and any logs. Setup prints a cron preview only: it does not install cron or send a message. Review the Node, CLI, and config paths, cron timezone, frequency, and service terms. Only after separate approval should the user install the reviewed entry while preserving existing cron jobs.
+
+`node dticket-cli.cjs run --config "$HOME/dticket-private/config.json"` checks and sends to Discord immediately; obtain separate approval before running it. Dates are fixed, and a message is sent on every run even if nothing changed. Output can be truncated; there is no retry or overlap prevention. The check has a 180-second overall timeout and Discord delivery a separate timeout. Monitor failures and logs. Tests mock webhook delivery and cron-related behavior; real Discord delivery and cron have not been tested end-to-end.
+
+## Tests and troubleshooting
+
+```sh
+npm test
+```
+
+Tests use a local HTTP server and mocked webhook behavior; they do not establish that the live site or Discord works. If station search finds nothing, try a partial or English name. If the CLI reports `availability unknown`, check connectivity or use the website directly; do not treat it as sold out. Live service responses can change.
+
+## AI agent use
+
+An agent with terminal access can use the CLI after reviewing the code and `SKILL.md`; compatibility with individual agents has not been verified. For example:
+
+> Inspect README.md, SKILL.md and the code in `/path/to/dticket-monitor`. Explain the steps and ask before installing or copying a skill. Do not schedule or send a message without separate approval. Do not ask for the webhook in chat; let me enter it in the hidden terminal prompt.
+
+The skill contains instructions, not the application. Consult your agent's skill installation documentation before copying it.
+
+## Security and privacy
+
+Searches send station and travel-date data to D-Ticket. `run` also sends results to Discord. Route arguments may be visible in process listings, shell history, or logs. Use the least access needed and protect private files. Static scanning of a Node development snapshot with SkillSpector 2.12.0 reported 44/100 (MEDIUM / CAUTION), including one HIGH finding on a cron example in documentation. That scan is not a security guarantee or an end-to-end test of cron or Discord.
+
+## License
+
+[MIT License](LICENSE)
